@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Day Log" />
+  <meta name="theme-color" content="#0c0a09" />
+  <title>Day Log</title>
+
+  <!-- Inline manifest so no extra files needed -->
+  <link rel="manifest" href='data:application/manifest+json,{"name":"Day Log","short_name":"Day Log","start_url":".","display":"standalone","background_color":"%230c0a09","theme_color":"%230c0a09","orientation":"portrait"}' />
+
+  <!-- iOS Home Screen icon (inline SVG → data URL) -->
+  <link rel="apple-touch-icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" rx="40" fill="%230c0a09"/><text x="90" y="118" font-family="Georgia,serif" font-style="italic" font-size="80" fill="%23fafaf9" text-anchor="middle" font-weight="300">d</text></svg>' />
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=JetBrains+Mono:wght@400;500&display=swap" />
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      background: #0c0a09;
+      overscroll-behavior-y: none;
+      -webkit-font-smoothing: antialiased;
+    }
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    div::-webkit-scrollbar { display: none; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    /* Loading splash */
+    #splash {
+      position: fixed; inset: 0; background: #0c0a09;
+      display: flex; align-items: center; justify-content: center;
+      color: #57534e;
+      font-family: Georgia, serif; font-style: italic; font-size: 18px;
+      z-index: 9999;
+    }
+  </style>
+
+  <!-- React + Babel from CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="splash">loading…</div>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useRef } = React;
+
+// ─────────────────────────────────────────────────────────────
+// LocalStorage shim (mimics window.storage API used in the artifact)
+// ─────────────────────────────────────────────────────────────
+const storage = {
+  get: async (key) => {
+    const v = localStorage.getItem(key);
+    return v === null ? null : { value: v };
+  },
+  set: async (key, value) => {
+    localStorage.setItem(key, value);
+    return { value };
+  },
+};
+
+// ─────────────────────────────────────────────────────────────
+// Tiny inline icon components (replacing lucide-react)
+// ─────────────────────────────────────────────────────────────
+const Icon = ({ children, size = 16, color = 'currentColor', strokeWidth = 1.5, fill = 'none', style }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+       fill={fill} stroke={color} strokeWidth={strokeWidth}
+       strokeLinecap="round" strokeLinejoin="round" style={style}>
+    {children}
+  </svg>
+);
+const ChevronDown = (p) => <Icon {...p}><polyline points="6 9 12 15 18 9" /></Icon>;
+const ChevronRight = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6" /></Icon>;
+const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></Icon>;
+const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
+const Moon = (p) => <Icon {...p}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></Icon>;
+const Lock = (p) => <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Icon>;
+const Trash2 = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></Icon>;
+const Calendar = (p) => <Icon {...p}><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></Icon>;
+const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12" /></Icon>;
+const Sunrise = (p) => <Icon {...p}><path d="M17 18a5 5 0 0 0-10 0" /><line x1="12" y1="2" x2="12" y2="9" /><line x1="4.22" y1="10.22" x2="5.64" y2="11.64" /><line x1="1" y1="18" x2="3" y2="18" /><line x1="21" y1="18" x2="23" y2="18" /><line x1="18.36" y1="11.64" x2="19.78" y2="10.22" /><line x1="23" y1="22" x2="1" y2="22" /><polyline points="8 6 12 2 16 6" /></Icon>;
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const formatDate = (key) => {
+  const [y, m, d] = key.split('-');
+  return new Date(+y, +m - 1, +d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+};
+const formatTime = (date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+const formatTimeISO = (iso) => formatTime(new Date(iso));
+const formatDateOnly = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+// ─────────────────────────────────────────────────────────────
+// Activity definitions
+// ─────────────────────────────────────────────────────────────
+const ACTIVITIES = [
+  { id: 'gym', label: 'Gym', category: 'Fitness', fields: [
+    { key: 'type', type: 'multi', label: 'Type', options: ['Upper', 'Lower', 'Abs', 'Full body'] },
+    { key: 'intensity', type: 'chips', label: 'Intensity', options: ['Light', 'Moderate', 'Hard', 'All-out'] },
+  ]},
+  { id: 'cardio', label: 'Cardio', category: 'Fitness', fields: [
+    { key: 'distance', type: 'number', label: 'Distance', placeholder: '3.5', step: 0.1, suffix: 'mi' },
+    { key: 'intensity', type: 'chips', label: 'Intensity', options: ['Light', 'Moderate', 'Hard', 'All-out'] },
+  ]},
+  { id: 'bike', label: 'Bike ride', category: 'Fitness', fields: [
+    { key: 'distance', type: 'number', label: 'Distance', placeholder: '8', step: 0.1, suffix: 'mi' },
+    { key: 'intensity', type: 'chips', label: 'Intensity', options: ['Light', 'Moderate', 'Hard', 'All-out'] },
+  ]},
+  { id: 'work', label: 'Work block', category: 'Work', fields: [
+    { key: 'hours', type: 'chips', label: 'Hours', options: ['1', '2', '3', '4', '5', '6+'] },
+  ]},
+  { id: 'computer', label: 'Computer time', category: 'Work', fields: [
+    { key: 'hours', type: 'chips', label: 'Hours', options: ['<1', '1', '2', '3', '4+'] },
+    { key: 'purpose', type: 'text', label: 'Doing what', placeholder: 'e.g. emails, design' },
+  ]},
+  { id: 'meeting', label: 'Meeting', category: 'Work', fields: [
+    { key: 'with', type: 'text', label: 'With', placeholder: 'Who or what' },
+    { key: 'duration', type: 'chips', label: 'Duration', options: ['15m', '30m', '45m', '1h', '1h+'] },
+  ]},
+  { id: 'appointment', label: 'Appointment booked', category: 'Work', fields: [
+    { key: 'name', type: 'text', label: 'Name', placeholder: 'Client / appointment name' },
+    { key: 'date', type: 'date', label: 'When' },
+  ]},
+  { id: 'cleaning_start', label: 'Start cleaning', category: 'Work', fields: [] },
+  { id: 'cleaning', label: 'Cleaning done', category: 'Work', fields: [] },
+  { id: 'break', label: 'Break', category: 'Life', fields: [
+    { key: 'duration', type: 'chips', label: 'How long', options: ['5m', '10m', '15m', '30m', '1h+'] },
+  ]},
+  { id: 'meal', label: 'Meal', category: 'Life', fields: [
+    { key: 'which', type: 'chips', label: 'Which', options: ['Breakfast', 'Lunch', 'Dinner', 'Snack'] },
+    { key: 'desc', type: 'text', label: 'What', placeholder: 'What did you eat?' },
+  ]},
+  { id: 'spending', label: 'Spending', category: 'Life', fields: [
+    { key: 'amount', type: 'number', label: 'Amount', placeholder: '12.50', step: 0.01, prefix: '$' },
+    { key: 'category', type: 'chips', label: 'Category', options: ['Food', 'Gas', 'Groceries', 'Bills', 'Fun', 'Other'] },
+    { key: 'desc', type: 'text', label: 'Description', placeholder: 'What for' },
+  ]},
+  { id: 'smoke', label: 'Smoke', category: 'Life', fields: [
+    { key: 'why', type: 'chips', label: 'Why', options: ['Stress', 'Boredom', 'Social', 'Craving', 'Habit', 'Other'] },
+  ]},
+  { id: 'sex', label: 'Sex', category: 'Life', fields: [] },
+  { id: 'note', label: 'Quick note', category: 'Life', fields: [
+    { key: 'text', type: 'text', label: 'Note', placeholder: 'A thought…' },
+  ]},
+  { id: 'custom', label: 'Other (custom)', category: 'Life', fields: [
+    { key: 'name', type: 'text', label: 'What did you do', placeholder: 'Activity name' },
+  ]},
+];
+
+const CATEGORIES = ['Fitness', 'Work', 'Life'];
+const getActivity = (id) => ACTIVITIES.find(a => a.id === id);
+
+// ─────────────────────────────────────────────────────────────
+// Storage hook
+// ─────────────────────────────────────────────────────────────
+const useStorage = (key, fallback) => {
+  const [val, setVal] = useState(fallback);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await storage.get(key);
+        if (r?.value) setVal(JSON.parse(r.value));
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, [key]);
+
+  const save = (newValOrFn) => {
+    setVal(prev => {
+      const next = typeof newValOrFn === 'function' ? newValOrFn(prev) : newValOrFn;
+      storage.set(key, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  return [val, save, loaded];
+};
+
+// ─────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────
+function App() {
+  const [days, saveDays, loaded] = useStorage('day_logs_v3', {});
+  const [now, setNow] = useState(new Date());
+  const [viewDate, setViewDate] = useState(todayKey());
+  const [picker, setPicker] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [wakeStep, setWakeStep] = useState('time');
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  const today = todayKey();
+  const currentDay = days[viewDate] || { entries: [], locked: false, summary: null, wake: null, affirmations: null };
+  const todayDay = days[today] || { entries: [], locked: false, summary: null, wake: null, affirmations: null };
+  const isToday = viewDate === today;
+  const isLocked = currentDay.locked;
+  const wakeGated = isToday && !isLocked && (!todayDay.wake || !todayDay.affirmations);
+
+  const addEntry = (activityId, values = {}) => {
+    const entry = {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      activityId, values, timestamp: new Date().toISOString(),
+    };
+    saveDays(prev => {
+      const day = prev[today] || { entries: [], locked: false };
+      if (day.locked) return prev;
+      return { ...prev, [today]: { ...day, entries: [...day.entries, entry] } };
+    });
+    setPicker(null);
+  };
+
+  const setWake = (timeStr) => {
+    saveDays(prev => ({ ...prev, [today]: { ...(prev[today] || { entries: [] }), wake: timeStr } }));
+    setWakeStep('affirmations');
+  };
+
+  const setAffirmations = (text) => {
+    saveDays(prev => ({ ...prev, [today]: { ...(prev[today] || { entries: [] }), affirmations: text } }));
+  };
+
+  const deleteEntry = (id) => {
+    saveDays(prev => {
+      const day = prev[viewDate];
+      if (!day || day.locked) return prev;
+      return { ...prev, [viewDate]: { ...day, entries: day.entries.filter(e => e.id !== id) } };
+    });
+  };
+
+  const handleNight = () => {
+    const day = days[today] || { entries: [] };
+    const summary = buildSummary(day);
+    saveDays(prev => ({ ...prev, [today]: { ...(prev[today] || { entries: [] }), locked: true, summary } }));
+  };
+
+  const unlock = () => {
+    saveDays(prev => ({ ...prev, [viewDate]: { ...prev[viewDate], locked: false } }));
+  };
+
+  if (!loaded) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c0a09', color: '#a8a29e' }}>
+        Loading…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      minHeight: '100vh', background: '#0c0a09', color: '#fafaf9',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+      WebkitFontSmoothing: 'antialiased',
+      paddingBottom: isToday && !isLocked && !wakeGated && currentDay.entries.length > 0 ? '120px' : '40px',
+    }}>
+      <header style={{
+        padding: '40px 24px 24px', textAlign: 'center', position: 'relative',
+        borderBottom: '1px solid #1c1917',
+      }}>
+        <button onClick={() => setHistoryOpen(true)} style={{
+          position: 'absolute', top: '20px', left: '20px',
+          background: 'transparent', border: 'none', color: '#78716c',
+          cursor: 'pointer', padding: '8px', display: 'flex',
+        }} aria-label="History">
+          <Calendar size={18} />
+        </button>
+
+        <div style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase',
+          color: '#57534e', marginBottom: '8px',
+        }}>
+          {isToday ? 'Today' : formatDate(viewDate).split(',')[0]}
+        </div>
+
+        <div style={{
+          fontSize: '64px', fontFamily: '"Fraunces", Georgia, serif',
+          fontWeight: 300, letterSpacing: '-0.04em', lineHeight: 1, color: '#fafaf9',
+        }}>
+          {isToday ? formatTime(now) : '—'}
+        </div>
+
+        <div style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: '11px', letterSpacing: '0.1em', color: '#78716c', marginTop: '10px',
+        }}>
+          {formatDate(viewDate)}
+        </div>
+
+        {isLocked && (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '5px',
+            marginTop: '14px', padding: '4px 10px',
+            background: '#1c1917', border: '1px solid #292524', borderRadius: '20px',
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#a8a29e',
+          }}>
+            <Lock size={10} strokeWidth={2} /> Day closed
+          </div>
+        )}
+      </header>
+
+      {wakeGated && (
+        <WakeGate step={wakeStep} wakeTime={todayDay.wake}
+                  onSetWake={setWake}
+                  onSetAffirmations={(txt) => { setAffirmations(txt); setWakeStep('time'); }} />
+      )}
+
+      {isToday && !isLocked && !wakeGated && (
+        <div style={{ padding: '24px 20px 0' }}>
+          <ActivityPicker picker={picker} setPicker={setPicker} onLog={addEntry} now={now} />
+        </div>
+      )}
+
+      {!wakeGated && (
+        <div style={{ padding: '24px 20px 0' }}>
+          {currentDay.wake && <PreEntries wake={currentDay.wake} affirmations={currentDay.affirmations} />}
+
+          {currentDay.entries.length === 0 && !currentDay.wake && (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#57534e' }}>
+              <p style={{ fontFamily: '"Fraunces", Georgia, serif', fontSize: '17px', fontStyle: 'italic', margin: '0 0 6px' }}>
+                Nothing logged this day.
+              </p>
+            </div>
+          )}
+
+          {currentDay.entries.length > 0 && (
+            <Timeline entries={currentDay.entries} onDelete={isLocked ? null : deleteEntry} />
+          )}
+        </div>
+      )}
+
+      {isLocked && currentDay.summary && (
+        <div style={{ padding: '32px 20px 20px' }}>
+          <SummaryCard summary={currentDay.summary} day={currentDay} />
+          {isToday && (
+            <button onClick={unlock} style={{
+              marginTop: '16px', width: '100%', padding: '13px',
+              background: 'transparent', color: '#78716c',
+              border: '1px solid #292524', borderRadius: '12px',
+              fontSize: '13px', fontFamily: 'inherit', cursor: 'pointer',
+            }}>
+              Reopen day
+            </button>
+          )}
+        </div>
+      )}
+
+      {isToday && !isLocked && !wakeGated && currentDay.entries.length > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0,
+          padding: '14px 20px calc(28px + env(safe-area-inset-bottom))',
+          background: 'linear-gradient(to top, #0c0a09 60%, transparent)',
+          zIndex: 50,
+        }}>
+          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+            <button onClick={handleNight} style={{
+              width: '100%', padding: '15px',
+              background: '#fafaf9', color: '#0c0a09',
+              border: 'none', borderRadius: '14px',
+              fontSize: '15px', fontWeight: 600, fontFamily: 'inherit',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              letterSpacing: '0.01em',
+            }}>
+              <Moon size={17} strokeWidth={2} fill="#0c0a09" /> End the day
+            </button>
+          </div>
+        </div>
+      )}
+
+      {historyOpen && (
+        <HistoryPanel days={days} currentDate={viewDate}
+          onPick={(k) => { setViewDate(k); setHistoryOpen(false); setPicker(null); }}
+          onClose={() => setHistoryOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Wake gate
+// ─────────────────────────────────────────────────────────────
+function WakeGate({ step, wakeTime, onSetWake, onSetAffirmations }) {
+  const [hour, setHour] = useState(7);
+  const [minute, setMinute] = useState(0);
+  const [period, setPeriod] = useState('AM');
+  const [affirmations, setAffirmationsInput] = useState('');
+
+  const submitWake = () => {
+    onSetWake(`${hour}:${String(minute).padStart(2, '0')} ${period}`);
+  };
+  const submitAffirmations = () => {
+    if (!affirmations.trim()) return;
+    onSetAffirmations(affirmations.trim());
+  };
+
+  if (step === 'time') {
+    return (
+      <div style={{ padding: '32px 20px 20px' }}>
+        <div style={{ background: '#171513', border: '1px solid #292524', borderRadius: '20px', padding: '28px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', justifyContent: 'center' }}>
+            <Sunrise size={14} color="#a8a29e" />
+            <span style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a8a29e',
+            }}>
+              Step 1 of 2
+            </span>
+          </div>
+          <h2 style={{
+            fontFamily: '"Fraunces", Georgia, serif',
+            fontSize: '26px', fontWeight: 400, fontStyle: 'italic',
+            margin: '0 0 22px', textAlign: 'center', letterSpacing: '-0.02em',
+          }}>
+            What time did you wake?
+          </h2>
+
+          <TimePicker hour={hour} minute={minute} period={period}
+                      onHour={setHour} onMinute={setMinute} onPeriod={setPeriod} />
+
+          <button onClick={submitWake} style={{
+            marginTop: '24px', width: '100%', padding: '14px',
+            background: '#fafaf9', color: '#0c0a09', border: 'none', borderRadius: '12px',
+            fontSize: '15px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+          }}>
+            Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '32px 20px 20px' }}>
+      <div style={{ background: '#171513', border: '1px solid #292524', borderRadius: '20px', padding: '28px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', justifyContent: 'center' }}>
+          <Sunrise size={14} color="#a8a29e" />
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a8a29e',
+          }}>
+            Step 2 of 2 · Up at {wakeTime}
+          </span>
+        </div>
+        <h2 style={{
+          fontFamily: '"Fraunces", Georgia, serif',
+          fontSize: '26px', fontWeight: 400, fontStyle: 'italic',
+          margin: '0 0 18px', textAlign: 'center', letterSpacing: '-0.02em',
+        }}>
+          Write your affirmations.
+        </h2>
+
+        <textarea value={affirmations} onChange={(e) => setAffirmationsInput(e.target.value)}
+          placeholder="Today I am…" autoFocus rows={6}
+          style={{
+            width: '100%', padding: '14px 16px',
+            fontSize: '16px', fontFamily: '"Fraunces", Georgia, serif', fontStyle: 'italic',
+            background: '#0c0a09', border: '1px solid #292524', borderRadius: '12px',
+            color: '#fafaf9', boxSizing: 'border-box', outline: 'none',
+            resize: 'none', lineHeight: 1.6,
+          }} />
+
+        <button onClick={submitAffirmations} disabled={!affirmations.trim()} style={{
+          marginTop: '16px', width: '100%', padding: '14px',
+          background: affirmations.trim() ? '#fafaf9' : '#292524',
+          color: affirmations.trim() ? '#0c0a09' : '#57534e',
+          border: 'none', borderRadius: '12px',
+          fontSize: '15px', fontWeight: 600, fontFamily: 'inherit',
+          cursor: affirmations.trim() ? 'pointer' : 'not-allowed',
+        }}>
+          Begin the day
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Time picker (Apple-style scrolling wheels)
+// ─────────────────────────────────────────────────────────────
+const ITEM_HEIGHT = 44;
+const VISIBLE = 5;
+
+function TimePicker({ hour, minute, period, onHour, onMinute, onPeriod }) {
+  const hours = Array.from({ length: 12 }, (_, i) => i + 1);
+  const minutes = Array.from({ length: 60 }, (_, i) => i);
+  const periods = ['AM', 'PM'];
+
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'center', alignItems: 'center',
+      gap: '4px', position: 'relative', height: `${ITEM_HEIGHT * VISIBLE}px`,
+    }}>
+      <div style={{
+        position: 'absolute', top: '50%', left: '8px', right: '8px',
+        transform: 'translateY(-50%)', height: `${ITEM_HEIGHT}px`,
+        background: 'rgba(250, 250, 249, 0.04)',
+        border: '1px solid #292524', borderRadius: '10px',
+        pointerEvents: 'none', zIndex: 1,
+      }} />
+      <Wheel items={hours} value={hour} onChange={onHour} format={(v) => String(v)} width={56} />
+      <span style={{ fontSize: '28px', color: '#fafaf9', fontFamily: '"Fraunces", serif', zIndex: 2 }}>:</span>
+      <Wheel items={minutes} value={minute} onChange={onMinute} format={(v) => String(v).padStart(2, '0')} width={56} />
+      <Wheel items={periods} value={period} onChange={onPeriod} format={(v) => v} width={52} />
+    </div>
+  );
+}
+
+function Wheel({ items, value, onChange, format, width }) {
+  const containerRef = useRef(null);
+  const isProgrammaticScroll = useRef(false);
+  const scrollTimeout = useRef(null);
+
+  useEffect(() => {
+    const idx = items.findIndex(it => it === value);
+    if (idx < 0 || !containerRef.current) return;
+    isProgrammaticScroll.current = true;
+    containerRef.current.scrollTop = idx * ITEM_HEIGHT;
+    setTimeout(() => { isProgrammaticScroll.current = false; }, 50);
+  }, [value, items]);
+
+  const handleScroll = () => {
+    if (!containerRef.current || isProgrammaticScroll.current) return;
+    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+    scrollTimeout.current = setTimeout(() => {
+      if (!containerRef.current) return;
+      const rawIdx = containerRef.current.scrollTop / ITEM_HEIGHT;
+      const snapIdx = Math.max(0, Math.min(items.length - 1, Math.round(rawIdx)));
+      const snapped = items[snapIdx];
+      isProgrammaticScroll.current = true;
+      containerRef.current.scrollTop = snapIdx * ITEM_HEIGHT;
+      setTimeout(() => { isProgrammaticScroll.current = false; }, 50);
+      if (snapped !== value) onChange(snapped);
+    }, 100);
+  };
+
+  const padding = (VISIBLE - 1) / 2 * ITEM_HEIGHT;
+
+  return (
+    <div ref={containerRef} onScroll={handleScroll} style={{
+      width: `${width}px`, height: `${ITEM_HEIGHT * VISIBLE}px`,
+      overflowY: 'scroll', scrollSnapType: 'y mandatory',
+      WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none',
+      position: 'relative', zIndex: 2,
+      maskImage: 'linear-gradient(to bottom, transparent, black 30%, black 70%, transparent)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 30%, black 70%, transparent)',
+    }}>
+      <div style={{ paddingTop: `${padding}px`, paddingBottom: `${padding}px` }}>
+        {items.map((it, i) => {
+          const isSelected = it === value;
+          return (
+            <div key={i} onClick={() => onChange(it)} style={{
+              height: `${ITEM_HEIGHT}px`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '24px', fontFamily: '"Fraunces", Georgia, serif',
+              fontWeight: 400, color: isSelected ? '#fafaf9' : '#57534e',
+              scrollSnapAlign: 'center', cursor: 'pointer',
+              transition: 'color 0.15s ease',
+            }}>
+              {format(it)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Pre-entries
+// ─────────────────────────────────────────────────────────────
+function PreEntries({ wake, affirmations }) {
+  return (
+    <div style={{
+      marginBottom: '14px', padding: '14px 16px',
+      background: 'linear-gradient(180deg, #1c1917 0%, #171513 100%)',
+      border: '1px solid #292524', borderRadius: '14px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: affirmations ? '10px' : 0 }}>
+        <Sunrise size={14} color="#a8a29e" />
+        <span style={{ fontSize: '14px', fontWeight: 500 }}>Woke up</span>
+        <span style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: '11px', color: '#78716c', marginLeft: 'auto',
+        }}>{wake}</span>
+      </div>
+      {affirmations && (
+        <div style={{
+          paddingTop: '10px', borderTop: '1px solid #1c1917',
+          fontFamily: '"Fraunces", Georgia, serif', fontStyle: 'italic',
+          fontSize: '14px', color: '#d6d3d1', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+        }}>
+          “{affirmations}”
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Activity picker
+// ─────────────────────────────────────────────────────────────
+function ActivityPicker({ picker, setPicker, onLog, now }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
+  }, []);
+
+  const pickActivity = (activity) => {
+    setDropdownOpen(false);
+    if (!activity.fields || activity.fields.length === 0) {
+      onLog(activity.id, {});
+    } else {
+      const initialVals = {};
+      activity.fields.forEach(f => { initialVals[f.key] = f.type === 'multi' ? [] : ''; });
+      setPicker({ activity, values: initialVals });
+    }
+  };
+
+  const submit = () => {
+    if (!picker || !isPickerValid(picker)) return;
+    onLog(picker.activity.id, picker.values);
+  };
+
+  const updateField = (key, val) => {
+    setPicker(p => ({ ...p, values: { ...p.values, [key]: val } }));
+  };
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative' }}>
+      <button onClick={() => { setDropdownOpen(o => !o); setPicker(null); }} style={{
+        width: '100%', padding: '14px 18px',
+        background: dropdownOpen ? '#1c1917' : '#171513', color: '#fafaf9',
+        border: `1px solid ${dropdownOpen ? '#3f3a36' : '#292524'}`,
+        borderRadius: '14px',
+        fontSize: '15px', fontFamily: 'inherit', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        transition: 'all 0.15s ease',
+      }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Plus size={17} strokeWidth={2} color="#a8a29e" />
+          <span style={{ color: picker ? '#fafaf9' : '#a8a29e' }}>
+            {picker ? picker.activity.label : 'Log an activity'}
+          </span>
+        </span>
+        <ChevronDown size={17} strokeWidth={2} color="#78716c"
+          style={{ transform: dropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </button>
+
+      {dropdownOpen && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+          background: '#171513', border: '1px solid #292524', borderRadius: '14px',
+          padding: '6px', zIndex: 30, maxHeight: '60vh', overflowY: 'auto',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+        }}>
+          {CATEGORIES.map(cat => (
+            <div key={cat} style={{ marginBottom: '4px' }}>
+              <div style={{
+                padding: '8px 12px 6px',
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#57534e',
+              }}>
+                {cat}
+              </div>
+              {ACTIVITIES.filter(a => a.category === cat).map(act => (
+                <button key={act.id} onClick={() => pickActivity(act)} style={{
+                  width: '100%', padding: '11px 14px',
+                  background: 'transparent', color: '#fafaf9',
+                  border: 'none', borderRadius: '10px',
+                  fontSize: '14px', fontFamily: 'inherit', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left',
+                }}>
+                  <span>{act.label}</span>
+                  {(!act.fields || act.fields.length === 0) && (
+                    <span style={{
+                      marginLeft: 'auto',
+                      fontFamily: '"JetBrains Mono", monospace',
+                      fontSize: '9px', color: '#57534e', letterSpacing: '0.1em',
+                    }}>TAP TO LOG</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {picker && !dropdownOpen && (
+        <div style={{
+          marginTop: '10px', padding: '16px',
+          background: '#171513', border: '1px solid #292524', borderRadius: '14px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 500 }}>{picker.activity.label}</span>
+            <button onClick={() => setPicker(null)} style={{
+              background: 'none', border: 'none', cursor: 'pointer', color: '#57534e', padding: 0, display: 'flex',
+            }}>
+              <X size={15} />
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {picker.activity.fields.map(field => (
+              <FieldInput key={field.key} field={field}
+                value={picker.values[field.key]}
+                onChange={(v) => updateField(field.key, v)}
+                onSubmit={submit} />
+            ))}
+          </div>
+
+          <button onClick={submit} disabled={!isPickerValid(picker)} style={{
+            marginTop: '16px', width: '100%', padding: '12px',
+            background: isPickerValid(picker) ? '#fafaf9' : '#292524',
+            color: isPickerValid(picker) ? '#0c0a09' : '#57534e',
+            border: 'none', borderRadius: '10px',
+            fontSize: '14px', fontWeight: 600, fontFamily: 'inherit',
+            cursor: isPickerValid(picker) ? 'pointer' : 'not-allowed',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+          }}>
+            <Check size={15} strokeWidth={2.5} />
+            Log at {formatTime(now)}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isPickerValid({ activity, values }) {
+  if (!activity.fields || activity.fields.length === 0) return true;
+  return activity.fields.every(f => {
+    const v = values[f.key];
+    if (f.type === 'multi') return Array.isArray(v) && v.length > 0;
+    if (f.type === 'number') return v !== '' && v !== null && !isNaN(parseFloat(v));
+    return v !== '' && v !== null && v !== undefined;
+  });
+}
+
+function FieldInput({ field, value, onChange, onSubmit }) {
+  return (
+    <div>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase',
+        color: '#78716c', marginBottom: '8px',
+      }}>
+        {field.label}
+      </div>
+      <FieldControl field={field} value={value} onChange={onChange} onSubmit={onSubmit} />
+    </div>
+  );
+}
+
+function FieldControl({ field, value, onChange, onSubmit }) {
+  const ft = field.type;
+
+  if (ft === 'chips') {
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {field.options.map(opt => (
+          <button key={opt} onClick={() => onChange(opt)} style={chipStyle(value === opt)}>{opt}</button>
+        ))}
+      </div>
+    );
+  }
+
+  if (ft === 'multi') {
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {field.options.map(opt => {
+          const active = (value || []).includes(opt);
+          return (
+            <button key={opt} onClick={() => {
+              const arr = value || [];
+              onChange(active ? arr.filter(v => v !== opt) : [...arr, opt]);
+            }} style={chipStyle(active)}>
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (ft === 'number') {
+    return (
+      <div style={{ position: 'relative' }}>
+        {field.prefix && (
+          <span style={{
+            position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)',
+            fontFamily: '"JetBrains Mono", monospace', fontSize: '14px', color: '#a8a29e',
+          }}>{field.prefix}</span>
+        )}
+        <input type="number" inputMode="decimal" step={field.step || 1}
+          value={value} onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          style={{
+            width: '100%',
+            padding: `12px ${field.suffix ? '50px' : '14px'} 12px ${field.prefix ? '30px' : '14px'}`,
+            fontSize: '16px', fontFamily: 'inherit',
+            background: '#0c0a09', border: '1px solid #292524', borderRadius: '10px',
+            color: '#fafaf9', boxSizing: 'border-box', outline: 'none',
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && onSubmit && onSubmit()} />
+        {field.suffix && (
+          <span style={{
+            position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+            fontFamily: '"JetBrains Mono", monospace', fontSize: '12px', color: '#57534e',
+          }}>{field.suffix}</span>
+        )}
+      </div>
+    );
+  }
+
+  if (ft === 'text') {
+    return (
+      <textarea value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={field.placeholder} rows={2} style={{
+          width: '100%', padding: '10px 14px',
+          fontSize: '15px', fontFamily: 'inherit',
+          background: '#0c0a09', border: '1px solid #292524', borderRadius: '10px',
+          color: '#fafaf9', boxSizing: 'border-box', outline: 'none',
+          resize: 'none', lineHeight: 1.5,
+        }} />
+    );
+  }
+
+  if (ft === 'date') {
+    return (
+      <input type="date" value={value} onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: '100%', padding: '12px 14px',
+          fontSize: '15px', fontFamily: 'inherit',
+          background: '#0c0a09', border: '1px solid #292524', borderRadius: '10px',
+          color: '#fafaf9', boxSizing: 'border-box', outline: 'none',
+          colorScheme: 'dark',
+        }} />
+    );
+  }
+
+  return null;
+}
+
+const chipStyle = (active) => ({
+  padding: '8px 14px',
+  fontSize: '13px', fontFamily: 'inherit',
+  fontWeight: active ? 600 : 400,
+  background: active ? '#fafaf9' : '#0c0a09',
+  color: active ? '#0c0a09' : '#a8a29e',
+  border: `1px solid ${active ? '#fafaf9' : '#292524'}`,
+  borderRadius: '20px', cursor: 'pointer',
+  transition: 'all 0.12s ease', minHeight: '34px',
+});
+
+// ─────────────────────────────────────────────────────────────
+// Timeline
+// ─────────────────────────────────────────────────────────────
+function Timeline({ entries, onDelete }) {
+  const sorted = [...entries].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{
+        position: 'absolute', left: '11px', top: '6px', bottom: '6px',
+        width: '1px', background: '#1c1917',
+      }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {sorted.map(entry => {
+          const act = getActivity(entry.activityId);
+          if (!act) return null;
+          const label = act.id === 'custom' && entry.values?.name ? entry.values.name : act.label;
+          return (
+            <div key={entry.id} style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+              <div style={{
+                width: '23px', height: '23px', borderRadius: '50%',
+                background: '#171513', border: '1px solid #3f3a36',
+                flexShrink: 0, marginTop: '4px', position: 'relative', zIndex: 1,
+              }} />
+              <div style={{
+                flex: 1,
+                background: '#171513', border: '1px solid #292524', borderRadius: '12px',
+                padding: '10px 14px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 500 }}>{label}</span>
+                    <span style={{
+                      fontFamily: '"JetBrains Mono", monospace',
+                      fontSize: '10px', color: '#57534e', letterSpacing: '0.05em',
+                    }}>
+                      {formatTimeISO(entry.timestamp)}
+                    </span>
+                  </div>
+                  <EntryValueDisplay activity={act} values={entry.values} />
+                </div>
+                {onDelete && (
+                  <button onClick={() => onDelete(entry.id)} style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: '#44403c', padding: '4px', display: 'flex', flexShrink: 0,
+                  }}>
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EntryValueDisplay({ activity, values }) {
+  if (!values || Object.keys(values).length === 0) return null;
+  if (activity.id === 'custom') return null;
+
+  const parts = [];
+  if (activity.id === 'cardio' || activity.id === 'bike') {
+    if (values.distance) parts.push(`${values.distance} mi`);
+    if (values.intensity) parts.push(values.intensity.toLowerCase());
+  } else if (activity.id === 'gym') {
+    if (values.type?.length) parts.push(values.type.join(', ').toLowerCase());
+    if (values.intensity) parts.push(values.intensity.toLowerCase());
+  } else if (activity.id === 'work' || activity.id === 'computer') {
+    if (values.hours) parts.push(`${values.hours}${values.hours.includes('+') || values.hours.includes('<') ? '' : 'h'}`);
+    if (values.purpose) parts.push(values.purpose);
+  } else if (activity.id === 'meeting') {
+    if (values.with) parts.push(values.with);
+    if (values.duration) parts.push(values.duration);
+  } else if (activity.id === 'appointment') {
+    if (values.name) parts.push(values.name);
+    if (values.date) parts.push(formatDateOnly(values.date));
+  } else if (activity.id === 'break') {
+    if (values.duration) parts.push(values.duration);
+  } else if (activity.id === 'meal') {
+    if (values.which) parts.push(values.which.toLowerCase());
+    if (values.desc) parts.push(values.desc);
+  } else if (activity.id === 'spending') {
+    if (values.amount) parts.push(`$${parseFloat(values.amount).toFixed(2)}`);
+    if (values.category) parts.push(values.category.toLowerCase());
+    if (values.desc) parts.push(values.desc);
+  } else if (activity.id === 'smoke') {
+    if (values.why) parts.push(values.why.toLowerCase());
+  } else if (activity.id === 'note') {
+    if (values.text) parts.push(values.text);
+  }
+
+  if (parts.length === 0) return null;
+
+  return (
+    <div style={{ fontSize: '13px', color: '#a8a29e', marginTop: '3px', lineHeight: 1.4 }}>
+      {parts.join(' · ')}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Summary
+// ─────────────────────────────────────────────────────────────
+function buildSummary(day) {
+  const entries = day.entries || [];
+  const lines = [];
+  if (day.wake) lines.push(`Woke up at ${day.wake}`);
+
+  const byId = {};
+  entries.forEach(e => {
+    if (!byId[e.activityId]) byId[e.activityId] = [];
+    byId[e.activityId].push(e);
+  });
+
+  if (byId.gym) {
+    const types = [...new Set(byId.gym.flatMap(e => e.values?.type || []))];
+    const intensities = [...new Set(byId.gym.map(e => e.values?.intensity).filter(Boolean))];
+    lines.push(`Gym${types.length ? ` — ${types.join(', ').toLowerCase()}` : ''}${intensities.length ? ` (${intensities.join('/').toLowerCase()})` : ''}`);
+  }
+  if (byId.cardio) {
+    const total = byId.cardio.reduce((s, e) => s + parseFloat(e.values?.distance || 0), 0);
+    lines.push(`Cardio — ${total.toFixed(1)} mi`);
+  }
+  if (byId.bike) {
+    const total = byId.bike.reduce((s, e) => s + parseFloat(e.values?.distance || 0), 0);
+    lines.push(`Bike — ${total.toFixed(1)} mi`);
+  }
+  if (byId.work) {
+    const total = byId.work.reduce((s, e) => {
+      const v = e.values?.hours;
+      return s + (v === '6+' ? 6 : parseInt(v) || 0);
+    }, 0);
+    lines.push(`${total}+ hrs of work (${byId.work.length} block${byId.work.length > 1 ? 's' : ''})`);
+  }
+  if (byId.computer) lines.push(`${byId.computer.length} computer session${byId.computer.length > 1 ? 's' : ''}`);
+  if (byId.meeting) lines.push(`${byId.meeting.length} meeting${byId.meeting.length > 1 ? 's' : ''}`);
+  if (byId.appointment) {
+    const names = byId.appointment.map(e => e.values?.name).filter(Boolean);
+    lines.push(`${byId.appointment.length} appointment${byId.appointment.length > 1 ? 's' : ''} booked${names.length ? ` (${names.join(', ')})` : ''}`);
+  }
+  if (byId.cleaning_start) lines.push(`Started ${byId.cleaning_start.length} cleaning${byId.cleaning_start.length > 1 ? 's' : ''}`);
+  if (byId.cleaning) lines.push(`${byId.cleaning.length} cleaning${byId.cleaning.length > 1 ? 's' : ''} done`);
+  if (byId.break) lines.push(`${byId.break.length} break${byId.break.length > 1 ? 's' : ''} taken`);
+  if (byId.meal) lines.push(`${byId.meal.length} meal${byId.meal.length > 1 ? 's' : ''}`);
+  if (byId.spending) {
+    const total = byId.spending.reduce((s, e) => s + parseFloat(e.values?.amount || 0), 0);
+    lines.push(`Spent $${total.toFixed(2)} (${byId.spending.length} transaction${byId.spending.length > 1 ? 's' : ''})`);
+  }
+  if (byId.smoke) lines.push(`Smoked ${byId.smoke.length}×`);
+  if (byId.sex) lines.push(`Sex`);
+  if (byId.custom) {
+    byId.custom.forEach(e => { if (e.values?.name) lines.push(e.values.name); });
+  }
+
+  return { lines, totalEntries: entries.length };
+}
+
+function SummaryCard({ summary, day }) {
+  const entries = day.entries || [];
+  const first = entries.length ? entries.reduce((a, b) => new Date(a.timestamp) < new Date(b.timestamp) ? a : b) : null;
+  const last = entries.length ? entries.reduce((a, b) => new Date(a.timestamp) > new Date(b.timestamp) ? a : b) : null;
+
+  return (
+    <div style={{
+      background: 'linear-gradient(180deg, #1c1917 0%, #171513 100%)',
+      border: '1px solid #292524', borderRadius: '20px', padding: '24px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+        <Moon size={14} color="#a8a29e" />
+        <span style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a8a29e',
+        }}>
+          Day summary
+        </span>
+      </div>
+      <h2 style={{
+        fontFamily: '"Fraunces", Georgia, serif',
+        fontSize: '24px', fontWeight: 400, fontStyle: 'italic',
+        margin: '0 0 18px', letterSpacing: '-0.02em', color: '#fafaf9',
+      }}>
+        That was today.
+      </h2>
+      {day.affirmations && (
+        <div style={{
+          marginBottom: '18px', paddingBottom: '16px',
+          borderBottom: '1px solid #1c1917',
+          fontFamily: '"Fraunces", Georgia, serif', fontStyle: 'italic',
+          fontSize: '13px', color: '#a8a29e', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+        }}>
+          “{day.affirmations}”
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+        {summary.lines.map((line, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'flex-start', gap: '10px',
+            padding: '9px 0', borderTop: i === 0 ? 'none' : '1px solid #1c1917',
+          }}>
+            <span style={{
+              width: '4px', height: '4px', borderRadius: '50%', background: '#57534e',
+              marginTop: '8px', flexShrink: 0,
+            }} />
+            <span style={{ fontSize: '14px', color: '#e7e5e4', lineHeight: 1.4 }}>{line}</span>
+          </div>
+        ))}
+      </div>
+      {first && last && first !== last && (
+        <div style={{
+          marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #1c1917',
+          display: 'flex', justifyContent: 'space-between',
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: '10px', letterSpacing: '0.1em', color: '#57534e', textTransform: 'uppercase',
+        }}>
+          <span>First: {formatTimeISO(first.timestamp)}</span>
+          <span>{summary.totalEntries} entries</span>
+          <span>Last: {formatTimeISO(last.timestamp)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// History
+// ─────────────────────────────────────────────────────────────
+function HistoryPanel({ days, currentDate, onPick, onClose }) {
+  const keys = Object.keys(days).sort().reverse();
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0,
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+      zIndex: 100, display: 'flex', alignItems: 'flex-end',
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: '100%', maxHeight: '80vh',
+        background: '#0c0a09', borderRadius: '24px 24px 0 0',
+        padding: '20px 20px calc(32px + env(safe-area-inset-bottom))', overflowY: 'auto',
+        borderTop: '1px solid #1c1917',
+      }}>
+        <div style={{
+          width: '36px', height: '4px',
+          background: '#292524', borderRadius: '2px',
+          margin: '0 auto 18px',
+        }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{
+            fontFamily: '"Fraunces", serif',
+            fontSize: '20px', fontStyle: 'italic', fontWeight: 500,
+            margin: 0, color: '#fafaf9',
+          }}>
+            Past days
+          </h3>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', color: '#78716c', cursor: 'pointer', display: 'flex', padding: 0,
+          }}>
+            <X size={20} />
+          </button>
+        </div>
+        {keys.length === 0 ? (
+          <p style={{ color: '#57534e', textAlign: 'center', padding: '40px 0', fontStyle: 'italic', fontFamily: '"Fraunces", serif' }}>
+            No past days yet.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {keys.map(k => {
+              const day = days[k];
+              const isCur = k === currentDate;
+              return (
+                <button key={k} onClick={() => onPick(k)} style={{
+                  background: isCur ? '#1c1917' : '#171513',
+                  border: `1px solid ${isCur ? '#3f3a36' : '#292524'}`,
+                  borderRadius: '12px', padding: '14px 16px',
+                  cursor: 'pointer', fontFamily: 'inherit', color: '#fafaf9', textAlign: 'left',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 500, marginBottom: '3px' }}>
+                      {formatDate(k)}
+                    </div>
+                    <div style={{
+                      fontFamily: '"JetBrains Mono", monospace',
+                      fontSize: '10px', color: '#78716c', letterSpacing: '0.05em',
+                    }}>
+                      {(day.entries?.length || 0)} entries · {day.locked ? 'closed' : 'open'}
+                      {day.wake && ` · up ${day.wake}`}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} color="#57534e" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mount
+// ─────────────────────────────────────────────────────────────
+const splash = document.getElementById('splash');
+if (splash) splash.remove();
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
+</body>
+</html>
